@@ -21,7 +21,7 @@ const crawler = new PlaywrightCrawler({
         await page.goto(searchUrl, { waitUntil: 'domcontentloaded' });
         await page.waitForSelector('table');
 
-        // Extract inmate basic data
+        // Extract inmate list
         const inmates = await page.evaluate(() => {
             const rows = Array.from(document.querySelectorAll('table tr')).slice(1);
 
@@ -46,7 +46,7 @@ const crawler = new PlaywrightCrawler({
 
             console.log('Fetching booking for SOID:', inmate.soid);
 
-            // 🔥 Direct POST request instead of clicking
+            // Direct POST request to booking page
             const response = await page.request.post(
                 'http://inmate-search.cobbsheriff.org/InmDetails.asp',
                 {
@@ -58,46 +58,101 @@ const crawler = new PlaywrightCrawler({
 
             const html = await response.text();
 
-            // Parse booking page
+            // 🔥 Parse entire booking page dynamically
             const detailData = await page.evaluate((html) => {
 
                 const parser = new DOMParser();
                 const doc = parser.parseFromString(html, 'text/html');
 
-                const getValue = (label) => {
-                    const cells = Array.from(doc.querySelectorAll('td'));
-                    const match = cells.find(td =>
-                        td.innerText.trim().toLowerCase() === label.toLowerCase()
-                    );
-                    return match ? match.nextElementSibling?.innerText.trim() : '';
-                };
+                const result = {};
 
-                return {
-                    agencyId: getValue('Agency ID'),
-                    arrestDateTime: getValue('Arrest Date/Time'),
-                    bookingStarted: getValue('Booking Started'),
-                    bookingComplete: getValue('Booking Complete'),
-                    height: getValue('Height'),
-                    weight: getValue('Weight'),
-                    hair: getValue('Hair'),
-                    eyes: getValue('Eyes'),
-                    address: getValue('Address'),
-                    city: getValue('City'),
-                    state: getValue('State'),
-                    zip: getValue('Zip'),
-                    placeOfBirth: getValue('Place of Birth'),
-                    visibleScars: getValue('Visible Scars and Marks'),
-                };
+                const tables = doc.querySelectorAll('table');
+
+                tables.forEach(table => {
+
+                    const rows = Array.from(table.querySelectorAll('tr'));
+
+                    rows.forEach(row => {
+
+                        const headers = Array.from(row.querySelectorAll('th')).map(h =>
+                            h.innerText.trim()
+                        );
+
+                        const cells = Array.from(row.querySelectorAll('td')).map(td =>
+                            td.innerText.trim()
+                        );
+
+                        // Header + Value rows
+                        if (headers.length && cells.length) {
+                            headers.forEach((header, i) => {
+                                if (cells[i]) {
+                                    result[header] = cells[i];
+                                }
+                            });
+                        }
+
+                        // Label / Value pair rows
+                        if (cells.length === 2) {
+                            const key = cells[0];
+                            const value = cells[1];
+                            if (key && value && key.length < 50) {
+                                result[key] = value;
+                            }
+                        }
+
+                    });
+                });
+
+                // Capture Charges table specifically
+                const chargeSection = [];
+
+                tables.forEach(table => {
+
+                    const headers = Array.from(table.querySelectorAll('th')).map(h =>
+                        h.innerText.trim()
+                    );
+
+                    if (headers.includes('Charge Description')) {
+
+                        const rows = Array.from(table.querySelectorAll('tr')).slice(1);
+
+                        rows.forEach(row => {
+
+                            const cells = Array.from(row.querySelectorAll('td')).map(td =>
+                                td.innerText.trim()
+                            );
+
+                            const chargeObj = {};
+
+                            headers.forEach((h, i) => {
+                                chargeObj[h] = cells[i] || '';
+                            });
+
+                            chargeSection.push(chargeObj);
+                        });
+                    }
+                });
+
+                if (chargeSection.length) {
+                    result['Charges'] = chargeSection;
+                }
+
+                return result;
+
             }, html);
 
             await Actor.pushData({
-                ...inmate,
-                ...detailData,
-                detailFetched: true,
+                searchContext: {
+                    searchName,
+                    searchType
+                },
+                inmateSummary: inmate,
+                bookingDetails: detailData,
             });
         }
     },
 });
 
 await crawler.run([{ url: searchUrl }]);
+
 await Actor.exit();
