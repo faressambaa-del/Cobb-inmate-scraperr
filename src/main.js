@@ -1,5 +1,5 @@
 import { Actor } from 'apify';
-import { CheerioCrawler, RequestQueue } from 'crawlee';
+import { PlaywrightCrawler } from 'crawlee';
 
 await Actor.init();
 
@@ -12,84 +12,61 @@ const {
 
 const searchUrl = `http://inmate-search.cobbsheriff.org/inquiry.asp?soid=&inmate_name=${encodeURIComponent(searchName)}&serial=&qry=${encodeURIComponent(searchType)}`;
 
-const requestQueue = await RequestQueue.open();
+const crawler = new PlaywrightCrawler({
+    headless: true,
 
-await requestQueue.addRequest({
-    url: searchUrl,
-    userData: { label: 'LIST' },
-});
+    async requestHandler({ page, request }) {
 
-const crawler = new CheerioCrawler({
-    requestQueue,
-    useSessionPool: true,
-    persistCookiesPerSession: true,
+        console.log('Opening search page');
 
-    requestHandlerTimeoutSecs: 60,
+        await page.goto(searchUrl, { waitUntil: 'networkidle' });
 
-    preNavigationHooks: [
-        async ({ request }) => {
-            request.headers = {
-                ...request.headers,
-                'User-Agent':
-                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-                Referer:
-                    'http://inmate-search.cobbsheriff.org/enter_name.htm',
-            };
-        },
-    ],
+        await page.waitForTimeout(3000);
 
-    async requestHandler({ $, request }) {
+        const bookingLinks = await page.$$eval('a', links =>
+            links
+                .map(a => a.getAttribute('href'))
+                .filter(href => href && href.includes('InmDetails.asp'))
+        );
 
-        const label = request.userData.label;
+        console.log(`Found ${bookingLinks.length} booking links`);
 
-        if (label === 'LIST') {
+        for (const href of bookingLinks) {
 
-            console.log('Processing search results page');
+            const fullUrl = `http://inmate-search.cobbsheriff.org/${href}`;
 
-            const links = [];
+            console.log('Opening detail page:', fullUrl);
 
-            $('a').each((_, el) => {
-                const href = $(el).attr('href');
+            await page.goto(fullUrl, { waitUntil: 'networkidle' });
 
-                if (href && href.includes('InmDetails.asp')) {
-                    const fullUrl = `http://inmate-search.cobbsheriff.org/${href}`;
-                    links.push(fullUrl);
-                }
+            await page.waitForTimeout(2000);
+
+            const data = await page.evaluate(() => {
+
+                const getValue = (label) => {
+                    const cell = [...document.querySelectorAll('td')]
+                        .find(td => td.innerText.trim() === label);
+                    return cell ? cell.nextElementSibling?.innerText.trim() : '';
+                };
+
+                return {
+                    name: getValue('Name'),
+                    dob: getValue('DOB'),
+                    raceSex: getValue('Race/Sex'),
+                    location: getValue('Location'),
+                    soid: getValue('SOID'),
+                    daysInCustody: getValue('Days in Custody'),
+                };
             });
 
-            console.log(`Found ${links.length} booking links`);
-
-            for (const url of links) {
-                await requestQueue.addRequest({
-                    url,
-                    userData: { label: 'DETAIL' },
-                });
-            }
-        }
-
-        if (label === 'DETAIL') {
-
-            console.log('Processing booking detail page:', request.url);
-
-            const name = $('td:contains("Name")').next().text().trim();
-            const dob = $('td:contains("DOB")').next().text().trim();
-            const raceSex = $('td:contains("Race/Sex")').next().text().trim();
-            const location = $('td:contains("Location")').next().text().trim();
-            const soid = $('td:contains("SOID")').next().text().trim();
-            const days = $('td:contains("Days in Custody")').next().text().trim();
-
             await Actor.pushData({
-                name,
-                dob,
-                raceSex,
-                location,
-                soid,
-                daysInCustody: days,
-                detailUrl: request.url,
+                ...data,
+                detailUrl: fullUrl,
             });
         }
     },
 });
 
-await crawler.run();
+await crawler.run([{ url: searchUrl }]);
+
 await Actor.exit();
