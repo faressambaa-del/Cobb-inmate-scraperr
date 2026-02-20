@@ -42,38 +42,30 @@ const crawler = new PlaywrightCrawler({
 
         console.log('Found inmates:', inmates.length);
 
-        // Extract booking URLs from page inputs
-        const bookingButtons = await page.$$eval('input', inputs =>
-            inputs
-                .map(i => i.getAttribute('onclick'))
-                .filter(o => o && o.includes('InmDetails.asp'))
-        );
-
-        console.log('Booking buttons found:', bookingButtons.length);
-
         for (const inmate of inmates) {
 
-            // Find matching booking button by SOID
-            const match = bookingButtons.find(b => b.includes(inmate.soid));
+            console.log('Fetching booking for SOID:', inmate.soid);
 
-            if (!match) continue;
+            // 🔥 Direct POST request instead of clicking
+            const response = await page.request.post(
+                'http://inmate-search.cobbsheriff.org/InmDetails.asp',
+                {
+                    form: {
+                        soid: inmate.soid,
+                    },
+                }
+            );
 
-            const urlMatch = match.match(/InmDetails\.asp[^']+/);
+            const html = await response.text();
 
-            if (!urlMatch) continue;
+            // Parse booking page
+            const detailData = await page.evaluate((html) => {
 
-            const fullDetailUrl =
-                `http://inmate-search.cobbsheriff.org/${urlMatch[0]}`;
-
-            console.log('Opening detail page:', fullDetailUrl);
-
-            await page.goto(fullDetailUrl, { waitUntil: 'domcontentloaded' });
-            await page.waitForSelector('table');
-
-            const detailData = await page.evaluate(() => {
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(html, 'text/html');
 
                 const getValue = (label) => {
-                    const cells = Array.from(document.querySelectorAll('td'));
+                    const cells = Array.from(doc.querySelectorAll('td'));
                     const match = cells.find(td =>
                         td.innerText.trim().toLowerCase() === label.toLowerCase()
                     );
@@ -96,12 +88,12 @@ const crawler = new PlaywrightCrawler({
                     placeOfBirth: getValue('Place of Birth'),
                     visibleScars: getValue('Visible Scars and Marks'),
                 };
-            });
+            }, html);
 
             await Actor.pushData({
                 ...inmate,
                 ...detailData,
-                detailUrl: fullDetailUrl,
+                detailFetched: true,
             });
         }
     },
