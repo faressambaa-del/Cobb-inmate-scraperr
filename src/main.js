@@ -1,68 +1,72 @@
 import { Actor } from 'apify';
 import got from 'got';
 import * as cheerio from 'cheerio';
+import { CookieJar } from 'tough-cookie';
 
 await Actor.init();
 
-// ---- INPUT ----
-// You can later replace this with Actor.getInput()
 const inmateName = 'Rankin Shawn';
 
+const baseUrl = 'http://inmate-search.cobbsheriff.org';
+
 const searchUrl =
-  `http://inmate-search.cobbsheriff.org/inquiry.asp?soid=&inmate_name=${encodeURIComponent(inmateName)}&serial=&qry=In+Custody`;
+  `${baseUrl}/inquiry.asp?soid=&inmate_name=${encodeURIComponent(inmateName)}&serial=&qry=In+Custody`;
 
-// ---- HEADERS (important for gov sites) ----
-const headers = {
-  'User-Agent':
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36',
-  'Accept':
-    'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-  'Accept-Language': 'en-US,en;q=0.9',
-  'Connection': 'keep-alive',
-};
+// ---- Maintain Session ----
+const cookieJar = new CookieJar();
 
-// ---- STEP 1: FETCH SEARCH PAGE ----
-const searchResponse = await got(searchUrl, { headers });
+const client = got.extend({
+  cookieJar,
+  headers: {
+    'User-Agent':
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36',
+    'Accept':
+      'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Connection': 'keep-alive',
+  },
+});
+
+// ---- STEP 1: Initial Visit (important for session) ----
+await client.get(baseUrl);
+
+// ---- STEP 2: Perform Search ----
+const searchResponse = await client.get(searchUrl);
 
 const $search = cheerio.load(searchResponse.body);
 
-// Find first details link
+// Debug: print first 500 chars if needed
+// console.log(searchResponse.body.slice(0, 500));
+
 const detailsRelativeUrl = $search('a[href*="InmDetails.asp"]').first().attr('href');
 
 if (!detailsRelativeUrl) {
-  console.log('No inmate found.');
+  console.log('Search page did not return inmate results.');
   await Actor.exit();
 }
 
-const detailsUrl = new URL(detailsRelativeUrl, searchUrl).href;
+const detailsUrl = new URL(detailsRelativeUrl, baseUrl).href;
 
-// ---- STEP 2: FETCH DETAILS PAGE ----
-const detailsResponse = await got(detailsUrl, { headers });
+// ---- STEP 3: Fetch Details Page (same session) ----
+const detailsResponse = await client.get(detailsUrl);
 const $ = cheerio.load(detailsResponse.body);
-
-// ---- STEP 3: EXTRACT DATA PROPERLY ----
 
 const result = {};
 
-// Extract all tables
-$('table').each((_, table) => {
-  const rows = $(table).find('tr');
+// Extract all header/value pairs properly
+$('tr').each((_, row) => {
+  const headers = $(row).find('th');
+  const values = $(row).find('td');
 
-  rows.each((_, row) => {
-    const headers = $(row).find('th');
-    const values = $(row).find('td');
-
-    if (headers.length && values.length && headers.length === values.length) {
-      headers.each((i, header) => {
-        const key = $(header).text().trim();
-        const value = values.eq(i).text().trim();
-        if (key) result[key] = value;
-      });
-    }
-  });
+  if (headers.length && values.length && headers.length === values.length) {
+    headers.each((i, header) => {
+      const key = $(header).text().trim();
+      const value = values.eq(i).text().trim();
+      if (key) result[key] = value;
+    });
+  }
 });
 
-// ---- CLEAN OUTPUT ----
 const cleaned = {
   agencyId: result['Agency ID'] || null,
   arrestDateTime: result['Arrest Date/Time'] || null,
