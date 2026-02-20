@@ -1,67 +1,63 @@
-async requestHandler({ request, page, log }) {
-    log.info(`Processing: ${request.url}`);
+import { Actor } from 'apify';
+import { PlaywrightCrawler } from 'crawlee';
 
-    // Wait for results table to load
-    await page.waitForSelector('table', { timeout: 60000 });
+await Actor.init();
 
-    // Extract the Last Known Booking link
-    const bookingLink = await page
-        .locator('a:has-text("Last Known Booking")')
-        .first()
-        .getAttribute('href');
+const crawler = new PlaywrightCrawler({
 
-    if (!bookingLink) {
-        log.warning('No "Last Known Booking" link found.');
-        return;
-    }
+    async requestHandler({ request, page, log }) {
 
-    const fullUrl = new URL(bookingLink, page.url()).href;
-    log.info(`Navigating to booking details: ${fullUrl}`);
+        log.info(`Processing: ${request.url}`);
 
-    // Go to booking details page
-    await page.goto(fullUrl, { waitUntil: 'networkidle' });
+        await page.waitForSelector('table', { timeout: 60000 });
 
-    // Wait for details page to load
-    await page.waitForSelector('text=Booking Information', { timeout: 60000 });
+        const bookingLink = await page
+            .locator('a:has-text("Last Known Booking")')
+            .first()
+            .getAttribute('href');
 
-    // Scrape structured data
-    const data = await page.evaluate(() => {
+        if (!bookingLink) {
+            log.warning('No booking link found.');
+            return;
+        }
 
-        const extractRowValue = (label) => {
-            const cells = Array.from(document.querySelectorAll('td'));
-            for (let i = 0; i < cells.length; i++) {
-                if (cells[i].innerText.trim() === label) {
-                    return cells[i + 1]?.innerText.trim() || null;
+        const fullUrl = new URL(bookingLink, page.url()).href;
+
+        await page.goto(fullUrl, { waitUntil: 'networkidle' });
+
+        await page.waitForSelector('text=Booking Information', { timeout: 60000 });
+
+        const data = await page.evaluate(() => {
+            const extractRowValue = (label) => {
+                const cells = Array.from(document.querySelectorAll('td'));
+                for (let i = 0; i < cells.length; i++) {
+                    if (cells[i].innerText.trim() === label) {
+                        return cells[i + 1]?.innerText.trim() || null;
+                    }
                 }
-            }
-            return null;
-        };
+                return null;
+            };
 
-        return {
-            name: extractRowValue('Name'),
-            dob: extractRowValue('DOB'),
-            raceSex: extractRowValue('Race/Sex'),
-            location: extractRowValue('Location'),
-            soid: extractRowValue('SOID'),
-            daysInCustody: extractRowValue('Days in Custody'),
-            agencyId: extractRowValue('Agency ID'),
-            arrestDateTime: extractRowValue('Arrest Date/Time'),
-            bookingStarted: extractRowValue('Booking Started'),
-            bookingComplete: extractRowValue('Booking Complete'),
-            height: extractRowValue('Height'),
-            weight: extractRowValue('Weight'),
-            hair: extractRowValue('Hair'),
-            eyes: extractRowValue('Eyes'),
-            address: extractRowValue('Address'),
-            city: extractRowValue('City'),
-            state: extractRowValue('State'),
-            zip: extractRowValue('Zip'),
-            placeOfBirth: extractRowValue('Place of Birth'),
-        };
-    });
+            return {
+                name: extractRowValue('Name'),
+                dob: extractRowValue('DOB'),
+                raceSex: extractRowValue('Race/Sex'),
+                location: extractRowValue('Location'),
+                soid: extractRowValue('SOID'),
+                daysInCustody: extractRowValue('Days in Custody'),
+                height: extractRowValue('Height'),
+                weight: extractRowValue('Weight'),
+                hair: extractRowValue('Hair'),
+                eyes: extractRowValue('Eyes'),
+            };
+        });
 
-    log.info('Scraped data:', data);
+        await Actor.pushData(data);
+    },
+});
 
-    // Push to dataset
-    await Actor.pushData(data);
-}
+await crawler.run([
+    'http://inmate-search.cobbsheriff.org/inquiry.asp?soid=&inmate_name=Rankin+Shawn&serial=&qry=In+Custody'
+]);
+
+await Actor.exit();
