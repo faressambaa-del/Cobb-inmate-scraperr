@@ -14,17 +14,15 @@ const searchUrl = `http://inmate-search.cobbsheriff.org/inquiry.asp?soid=&inmate
 
 const crawler = new PlaywrightCrawler({
     headless: true,
-
     async requestHandler({ page }) {
 
         console.log('Opening search page');
         await page.goto(searchUrl, { waitUntil: 'domcontentloaded' });
         await page.waitForSelector('table');
 
-        // =============================
+        // ===============================
         // EXTRACT INMATE SUMMARY
-        // =============================
-
+        // ===============================
         const inmates = await page.evaluate(() => {
             const rows = Array.from(document.querySelectorAll('table tr')).slice(1);
 
@@ -45,40 +43,31 @@ const crawler = new PlaywrightCrawler({
 
         console.log('Found inmates:', inmates.length);
 
-        // =============================
-        // LOOP EACH INMATE
-        // =============================
-
         for (const inmate of inmates) {
 
             console.log('Fetching booking for SOID:', inmate.soid);
 
             const response = await page.request.post(
                 'http://inmate-search.cobbsheriff.org/InmDetails.asp',
-                {
-                    form: { soid: inmate.soid },
-                }
+                { form: { soid: inmate.soid } }
             );
 
             const html = await response.text();
 
-            // =============================
+            // ===============================
             // PARSE BOOKING PAGE
-            // =============================
-
+            // ===============================
             const detailData = await page.evaluate((html) => {
 
                 const parser = new DOMParser();
                 const doc = parser.parseFromString(html, 'text/html');
 
                 const result = {};
-
                 const tables = Array.from(doc.querySelectorAll('table'));
 
-                // =============================
+                // ===============================
                 // BOOKING INFORMATION
-                // =============================
-
+                // ===============================
                 const bookingTable = tables.find(t =>
                     t.innerText.includes('Booking Information')
                 );
@@ -87,16 +76,17 @@ const crawler = new PlaywrightCrawler({
                     const rows = bookingTable.querySelectorAll('tr');
                     const values = rows[1]?.querySelectorAll('td');
 
-                    result.agencyId = values?.[0]?.innerText.trim();
-                    result.arrestDateTime = values?.[1]?.innerText.trim();
-                    result.bookingStarted = values?.[2]?.innerText.trim();
-                    result.bookingComplete = values?.[3]?.innerText.trim();
+                    result.booking = {
+                        agencyId: values?.[0]?.innerText.trim(),
+                        arrestDateTime: values?.[1]?.innerText.trim(),
+                        bookingStarted: values?.[2]?.innerText.trim(),
+                        bookingComplete: values?.[3]?.innerText.trim(),
+                    };
                 }
 
-                // =============================
+                // ===============================
                 // PERSONAL INFORMATION
-                // =============================
-
+                // ===============================
                 const personalTable = tables.find(t =>
                     t.innerText.includes('Personal Information')
                 );
@@ -104,81 +94,80 @@ const crawler = new PlaywrightCrawler({
                 if (personalTable) {
                     const rows = personalTable.querySelectorAll('tr');
 
-                    const mainRow = rows[1]?.querySelectorAll('td');
-                    result.fullName = mainRow?.[0]?.innerText.trim();
-                    result.dob = mainRow?.[1]?.innerText.trim();
-                    result.raceSex = mainRow?.[2]?.innerText.trim();
-                    result.location = mainRow?.[3]?.innerText.trim();
-                    result.soid = mainRow?.[4]?.innerText.trim();
-                    result.daysInCustody = mainRow?.[5]?.innerText.trim();
+                    const main = rows[1]?.querySelectorAll('td');
+                    const body = rows[3]?.querySelectorAll('td');
+                    const address = rows[5]?.querySelectorAll('td');
+                    const pob = rows[7]?.querySelectorAll('td');
+                    const scars = rows[9]?.querySelectorAll('td');
 
-                    const bodyRow = rows[3]?.querySelectorAll('td');
-                    result.height = bodyRow?.[0]?.innerText.trim();
-                    result.weight = bodyRow?.[1]?.innerText.trim();
-                    result.hair = bodyRow?.[2]?.innerText.trim();
-                    result.eyes = bodyRow?.[3]?.innerText.trim();
-
-                    const addressRow = rows[5]?.querySelectorAll('td');
-                    result.address = addressRow?.[0]?.innerText.trim();
-                    result.city = addressRow?.[1]?.innerText.trim();
-                    result.state = addressRow?.[2]?.innerText.trim();
-                    result.zip = addressRow?.[3]?.innerText.trim();
-
-                    const pobRow = rows[7]?.querySelectorAll('td');
-                    result.placeOfBirth = pobRow?.[1]?.innerText.trim();
-
-                    const scarsRow = rows[9]?.querySelectorAll('td');
-                    result.visibleScars = scarsRow?.[0]?.innerText.trim();
+                    result.personal = {
+                        fullName: main?.[0]?.innerText.trim(),
+                        dob: main?.[1]?.innerText.trim(),
+                        raceSex: main?.[2]?.innerText.trim(),
+                        location: main?.[3]?.innerText.trim(),
+                        soid: main?.[4]?.innerText.trim(),
+                        daysInCustody: main?.[5]?.innerText.trim(),
+                        height: body?.[0]?.innerText.trim(),
+                        weight: body?.[1]?.innerText.trim(),
+                        hair: body?.[2]?.innerText.trim(),
+                        eyes: body?.[3]?.innerText.trim(),
+                        address: address?.[0]?.innerText.trim(),
+                        city: address?.[1]?.innerText.trim(),
+                        state: address?.[2]?.innerText.trim(),
+                        zip: address?.[3]?.innerText.trim(),
+                        placeOfBirth: pob?.[1]?.innerText.trim(),
+                        visibleScars: scars?.[0]?.innerText.trim(),
+                    };
                 }
 
-                // =============================
-                // CHARGES / BOND TABLE
-                // =============================
-
-                const chargesTable = tables.find(t =>
-                    t.innerText.includes('Charge Description')
-                );
-
+                // ===============================
+                // CHARGES / BOND / ATTORNEY
+                // ===============================
                 const charges = [];
 
-                if (chargesTable) {
+                tables.forEach(table => {
 
-                    const headers = Array.from(
-                        chargesTable.querySelectorAll('th')
-                    ).map(h => h.innerText.trim());
+                    const text = table.innerText;
 
-                    const rows = Array.from(
-                        chargesTable.querySelectorAll('tr')
-                    ).slice(1);
+                    if (
+                        text.includes('Charge Description') ||
+                        text.includes('Bond Amount') ||
+                        text.includes('Bonding Company') ||
+                        text.includes('Attorney')
+                    ) {
 
-                    rows.forEach(row => {
+                        const rows = Array.from(table.querySelectorAll('tr'));
 
-                        const cells = Array.from(
-                            row.querySelectorAll('td')
-                        ).map(td => td.innerText.trim());
+                        if (rows.length < 2) return;
 
-                        if (cells.length) {
+                        const headerCells = Array.from(rows[0].querySelectorAll('td, th'))
+                            .map(cell => cell.innerText.trim());
+
+                        rows.slice(1).forEach(row => {
+
+                            const cells = Array.from(row.querySelectorAll('td'))
+                                .map(cell => cell.innerText.trim());
+
+                            if (!cells.length) return;
 
                             const chargeObj = {};
 
-                            headers.forEach((header, index) => {
-                                chargeObj[header] = cells[index] || '';
+                            headerCells.forEach((header, index) => {
+                                if (header) {
+                                    chargeObj[header] = cells[index] || '';
+                                }
                             });
 
                             charges.push(chargeObj);
-                        }
-                    });
-                }
+                        });
+                    }
+                });
 
                 result.charges = charges;
 
                 return result;
 
             }, html);
-
-            // =============================
-            // PUSH FINAL DATASET ENTRY
-            // =============================
 
             await Actor.pushData({
                 searchContext: {
