@@ -24,63 +24,28 @@ const crawler = new CheerioCrawler({
     useSessionPool: true,
     persistCookiesPerSession: true,
 
-    async requestHandler({ $, request }) {
+    async requestHandler({ $, request, body }) {
 
-        // =========================
-        // LIST PAGE
-        // =========================
         if (request.label === 'LIST') {
 
-            console.log('Processing search results page');
+            console.log("=== RAW HTML LENGTH ===");
+            console.log(body.length);
 
-            const links = [];
+            console.log("=== FIRST 1000 CHARS ===");
+            console.log(body.substring(0, 1000));
 
-            $('a[href*="InmDetails.asp"]').each((_, el) => {
+            const allLinks = $('a');
+            console.log("Total <a> tags found:", allLinks.length);
+
+            allLinks.each((i, el) => {
                 const href = $(el).attr('href');
-
                 if (href) {
-                    const fullUrl = `http://inmate-search.cobbsheriff.org/${href}`;
-                    links.push(fullUrl);
+                    console.log("Link:", href);
                 }
-            });
-
-            console.log(`Found ${links.length} booking links`);
-
-            for (const url of links) {
-                await requestQueue.addRequest({
-                    url,
-                    label: 'DETAIL',
-                });
-            }
-        }
-
-        // =========================
-        // DETAIL PAGE
-        // =========================
-        if (request.label === 'DETAIL') {
-
-            console.log('Processing booking detail page:', request.url);
-
-            const name = $('td:contains("Name")').next().text().trim();
-            const dob = $('td:contains("DOB")').next().text().trim();
-            const raceSex = $('td:contains("Race/Sex")').next().text().trim();
-            const location = $('td:contains("Location")').next().text().trim();
-            const soid = $('td:contains("SOID")').next().text().trim();
-            const days = $('td:contains("Days in Custody")').next().text().trim();
-
-            await Actor.pushData({
-                name,
-                dob,
-                raceSex,
-                location,
-                soid,
-                daysInCustody: days,
-                detailUrl: request.url,
             });
         }
     },
 });
 
 await crawler.run();
-
 await Actor.exit();
