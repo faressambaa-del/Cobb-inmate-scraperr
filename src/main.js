@@ -15,13 +15,20 @@ const searchUrl = `http://inmate-search.cobbsheriff.org/inquiry.asp?soid=&inmate
 const crawler = new PlaywrightCrawler({
     headless: true,
 
-    async requestHandler({ page, request }) {
+    async requestHandler({ page }) {
 
         console.log('Opening search page');
 
-        await page.goto(searchUrl, { waitUntil: 'networkidle' });
+        await page.goto(searchUrl, { waitUntil: 'domcontentloaded' });
 
-        await page.waitForTimeout(3000);
+        // WAIT FOR RESULTS TABLE
+        await page.waitForSelector('table', { timeout: 15000 });
+
+        console.log('Search page loaded');
+
+        // Debug: print page content length
+        const html = await page.content();
+        console.log('HTML length:', html.length);
 
         const bookingLinks = await page.$$eval('a', links =>
             links
@@ -37,16 +44,18 @@ const crawler = new PlaywrightCrawler({
 
             console.log('Opening detail page:', fullUrl);
 
-            await page.goto(fullUrl, { waitUntil: 'networkidle' });
+            await page.goto(fullUrl, { waitUntil: 'domcontentloaded' });
 
-            await page.waitForTimeout(2000);
+            await page.waitForSelector('table', { timeout: 10000 });
 
             const data = await page.evaluate(() => {
 
                 const getValue = (label) => {
-                    const cell = [...document.querySelectorAll('td')]
-                        .find(td => td.innerText.trim() === label);
-                    return cell ? cell.nextElementSibling?.innerText.trim() : '';
+                    const cells = Array.from(document.querySelectorAll('td'));
+                    const match = cells.find(td =>
+                        td.innerText.trim().toLowerCase() === label.toLowerCase()
+                    );
+                    return match ? match.nextElementSibling?.innerText.trim() : '';
                 };
 
                 return {
@@ -68,5 +77,4 @@ const crawler = new PlaywrightCrawler({
 });
 
 await crawler.run([{ url: searchUrl }]);
-
 await Actor.exit();
