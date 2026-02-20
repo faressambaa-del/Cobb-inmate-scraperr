@@ -18,40 +18,83 @@ const crawler = new PlaywrightCrawler({
     async requestHandler({ page }) {
 
         console.log('Opening search page');
-
         await page.goto(searchUrl, { waitUntil: 'domcontentloaded' });
         await page.waitForSelector('table');
 
-        // Extract rows from results table
-        const rows = await page.$$eval('table tr', trs =>
-            trs.slice(1).map(tr => {
-                const cells = Array.from(tr.querySelectorAll('td'));
-                return cells.map(td => td.innerText.trim());
+        const inmates = await page.$$eval('table tr', rows =>
+            rows.slice(1).map(row => {
+                const cells = Array.from(row.querySelectorAll('td'));
+
+                const button = row.querySelector('input[type="button"]');
+                let bookingUrl = '';
+
+                if (button && button.getAttribute('onclick')) {
+                    const match = button.getAttribute('onclick')
+                        .match(/InmDetails\.asp[^']+/);
+                    if (match) {
+                        bookingUrl = match[0];
+                    }
+                }
+
+                return {
+                    name: cells[1]?.innerText.trim(),
+                    dob: cells[2]?.innerText.trim(),
+                    race: cells[3]?.innerText.trim(),
+                    sex: cells[4]?.innerText.trim(),
+                    location: cells[5]?.innerText.trim(),
+                    soid: cells[6]?.innerText.trim(),
+                    daysInCustody: cells[7]?.innerText.trim(),
+                    bookingUrl,
+                };
             })
         );
 
-        console.log('Rows found:', rows.length);
+        console.log('Found inmates:', inmates.length);
 
-        for (const row of rows) {
+        for (const inmate of inmates) {
 
-            // Based on your screenshot structure:
-            // [Image, Name, DOB, Race, Sex, Location, SOID, Days, ...]
-            const name = row[1];
-            const dob = row[2];
-            const race = row[3];
-            const sex = row[4];
-            const location = row[5];
-            const soid = row[6];
-            const days = row[7];
+            if (!inmate.bookingUrl) continue;
+
+            const fullDetailUrl =
+                `http://inmate-search.cobbsheriff.org/${inmate.bookingUrl}`;
+
+            console.log('Opening detail page:', fullDetailUrl);
+
+            await page.goto(fullDetailUrl, { waitUntil: 'domcontentloaded' });
+            await page.waitForSelector('table');
+
+            const detailData = await page.evaluate(() => {
+
+                const getValue = (label) => {
+                    const cells = Array.from(document.querySelectorAll('td'));
+                    const match = cells.find(td =>
+                        td.innerText.trim().toLowerCase() === label.toLowerCase()
+                    );
+                    return match ? match.nextElementSibling?.innerText.trim() : '';
+                };
+
+                return {
+                    agencyId: getValue('Agency ID'),
+                    arrestDateTime: getValue('Arrest Date/Time'),
+                    bookingStarted: getValue('Booking Started'),
+                    bookingComplete: getValue('Booking Complete'),
+                    height: getValue('Height'),
+                    weight: getValue('Weight'),
+                    hair: getValue('Hair'),
+                    eyes: getValue('Eyes'),
+                    address: getValue('Address'),
+                    city: getValue('City'),
+                    state: getValue('State'),
+                    zip: getValue('Zip'),
+                    placeOfBirth: getValue('Place of Birth'),
+                    visibleScars: getValue('Visible Scars and Marks'),
+                };
+            });
 
             await Actor.pushData({
-                name,
-                dob,
-                race,
-                sex,
-                location,
-                soid,
-                daysInCustody: days,
+                ...inmate,
+                ...detailData,
+                detailUrl: fullDetailUrl,
             });
         }
     },
