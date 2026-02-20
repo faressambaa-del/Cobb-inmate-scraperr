@@ -4,9 +4,17 @@ import { CheerioCrawler } from 'crawlee';
 await Actor.init();
 
 const input = await Actor.getInput();
-const { name = 'john', maxResults = 10 } = input || {};
+const {
+    name = 'john',
+    status = 'In Custody',
+    maxResults = 10
+} = input || {};
 
-console.log(`Searching for: "${name}"`);
+console.log(`Searching for: "${name}" | Status: ${status}`);
+
+const searchUrl = `http://inmate-search.cobbsheriff.org/inquiry.asp?soid=&inmate_name=${encodeURIComponent(name)}&serial=&qry=${encodeURIComponent(status)}`;
+
+console.log(`Search URL: ${searchUrl}`);
 
 const results = [];
 
@@ -14,15 +22,18 @@ const crawler = new CheerioCrawler({
     async requestHandler({ $, request }) {
         console.log(`Processing ${request.url}`);
 
-        // Example: adjust selectors based on actual page structure
         $('table tr').each((i, el) => {
-            if (i === 0) return; // skip header
+            if (i === 0) return;
 
-            const row = $(el).find('td');
+            const cells = $(el).find('td');
+
             const record = {
-                fullName: $(row[0]).text().trim(),
-                bookingNumber: $(row[1]).text().trim(),
-                status: $(row[2]).text().trim(),
+                fullName: $(cells[0]).text().trim(),
+                bookingNumber: $(cells[1]).text().trim(),
+                sex: $(cells[2]).text().trim(),
+                race: $(cells[3]).text().trim(),
+                age: $(cells[4]).text().trim(),
+                status: $(cells[5]).text().trim(),
             };
 
             if (record.fullName) {
@@ -32,9 +43,7 @@ const crawler = new CheerioCrawler({
     }
 });
 
-await crawler.run([
-    'http://inmate-search.cobbsheriff.org/enter_name.htm'
-]);
+await crawler.run([searchUrl]);
 
 await Actor.pushData(results.slice(0, maxResults));
 
