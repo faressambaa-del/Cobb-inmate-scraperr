@@ -1,0 +1,7 @@
+{
+    "actorSpecification": 1,
+    "name": "cobb-inmate-scraper",
+    "title": "Cobb County Inmate Scraper",
+    "version": "1.0",
+    "dockerfile": "../Dockerfile"
+}
