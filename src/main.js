@@ -1,141 +1,67 @@
-import { Actor } from 'apify';
-import { PlaywrightCrawler } from 'crawlee';
+async requestHandler({ request, page, log }) {
+    log.info(`Processing: ${request.url}`);
 
-await Actor.init();
+    // Wait for results table to load
+    await page.waitForSelector('table', { timeout: 60000 });
 
-const input = await Actor.getInput();
+    // Extract the Last Known Booking link
+    const bookingLink = await page
+        .locator('a:has-text("Last Known Booking")')
+        .first()
+        .getAttribute('href');
 
-const {
-    searchName = 'Rankin Shawn',
-    searchType = 'In Custody',
-} = input || {};
+    if (!bookingLink) {
+        log.warning('No "Last Known Booking" link found.');
+        return;
+    }
 
-const searchUrl = `http://inmate-search.cobbsheriff.org/inquiry.asp?soid=&inmate_name=${encodeURIComponent(searchName)}&serial=&qry=${encodeURIComponent(searchType)}`;
+    const fullUrl = new URL(bookingLink, page.url()).href;
+    log.info(`Navigating to booking details: ${fullUrl}`);
 
-const crawler = new PlaywrightCrawler({
-    headless: true,
+    // Go to booking details page
+    await page.goto(fullUrl, { waitUntil: 'networkidle' });
 
-    async requestHandler({ page }) {
+    // Wait for details page to load
+    await page.waitForSelector('text=Booking Information', { timeout: 60000 });
 
-        console.log('Opening search page...');
-        await page.goto(searchUrl, { waitUntil: 'domcontentloaded' });
+    // Scrape structured data
+    const data = await page.evaluate(() => {
 
-        await page.waitForSelector('table');
-
-        // ================================
-        // Extract inmate row correctly
-        // ================================
-
-        const row = await page.$('table tr:nth-child(2)');
-        const cells = await row.$$('td');
-
-        const name = (await cells[1].innerText()).trim();
-        const dob = (await cells[2].innerText()).trim();
-        const race = (await cells[3].innerText()).trim();
-        const sex = (await cells[4].innerText()).trim();
-        const location = (await cells[5].innerText()).trim();
-        const soid = (await cells[6].innerText()).trim();
-        const daysInCustody = (await cells[7].innerText()).trim();
-
-        console.log('SOID:', soid);
-
-        // ================================
-        // Click Last Known Booking button
-        // ================================
-
-        await page.click('input[value="Last Known Booking"]');
-
-        // Wait for booking page to load
-        await page.waitForSelector('text=Booking Information');
-
-        console.log('Booking page loaded');
-
-        // ================================
-        // Extract ALL booking data
-        // ================================
-
-        const bookingData = await page.evaluate(() => {
-
-            const clean = (val) => val ? val.trim() : '';
-
-            const getCellValue = (labelText) => {
-                const cells = Array.from(document.querySelectorAll('td'));
-                for (let i = 0; i < cells.length; i++) {
-                    if (cells[i].innerText.includes(labelText)) {
-                        return clean(cells[i + 1]?.innerText);
-                    }
+        const extractRowValue = (label) => {
+            const cells = Array.from(document.querySelectorAll('td'));
+            for (let i = 0; i < cells.length; i++) {
+                if (cells[i].innerText.trim() === label) {
+                    return cells[i + 1]?.innerText.trim() || null;
                 }
-                return '';
-            };
+            }
+            return null;
+        };
 
-            // Booking info
-            const agencyId = getCellValue('Agency ID');
-            const arrestDateTime = getCellValue('Arrest Date/Time');
-            const bookingStarted = getCellValue('Booking Started');
-            const bookingComplete = getCellValue('Booking Complete');
+        return {
+            name: extractRowValue('Name'),
+            dob: extractRowValue('DOB'),
+            raceSex: extractRowValue('Race/Sex'),
+            location: extractRowValue('Location'),
+            soid: extractRowValue('SOID'),
+            daysInCustody: extractRowValue('Days in Custody'),
+            agencyId: extractRowValue('Agency ID'),
+            arrestDateTime: extractRowValue('Arrest Date/Time'),
+            bookingStarted: extractRowValue('Booking Started'),
+            bookingComplete: extractRowValue('Booking Complete'),
+            height: extractRowValue('Height'),
+            weight: extractRowValue('Weight'),
+            hair: extractRowValue('Hair'),
+            eyes: extractRowValue('Eyes'),
+            address: extractRowValue('Address'),
+            city: extractRowValue('City'),
+            state: extractRowValue('State'),
+            zip: extractRowValue('Zip'),
+            placeOfBirth: extractRowValue('Place of Birth'),
+        };
+    });
 
-            // Charges table extraction
-            const charges = [];
-            const tables = Array.from(document.querySelectorAll('table'));
+    log.info('Scraped data:', data);
 
-            tables.forEach(table => {
-
-                if (table.innerText.includes('Charge Description')) {
-
-                    const rows = Array.from(table.querySelectorAll('tr'));
-                    const headers = Array.from(rows[0].querySelectorAll('td, th'))
-                        .map(h => h.innerText.trim());
-
-                    rows.slice(1).forEach(row => {
-
-                        const cells = Array.from(row.querySelectorAll('td'))
-                            .map(c => c.innerText.trim());
-
-                        if (!cells.length) return;
-
-                        const obj = {};
-                        headers.forEach((header, i) => {
-                            obj[header] = cells[i] || '';
-                        });
-
-                        charges.push(obj);
-                    });
-                }
-            });
-
-            // Bonding company
-            const bondingCompany = getCellValue('Bonding Company');
-
-            // Attorney
-            const attorney = getCellValue('Attorney');
-
-            return {
-                agencyId,
-                arrestDateTime,
-                bookingStarted,
-                bookingComplete,
-                bondingCompany,
-                attorney,
-                charges
-            };
-        });
-
-        await Actor.pushData({
-            inmateSummary: {
-                name,
-                dob,
-                race,
-                sex,
-                location,
-                soid,
-                daysInCustody
-            },
-            bookingDetails: bookingData
-        });
-
-        console.log('Data pushed successfully.');
-    },
-});
-
-await crawler.run([{ url: searchUrl }]);
-await Actor.exit();
+    // Push to dataset
+    await Actor.pushData(data);
+}
