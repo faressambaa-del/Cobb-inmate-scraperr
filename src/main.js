@@ -16,7 +16,7 @@ const requestQueue = await RequestQueue.open();
 
 await requestQueue.addRequest({
     url: searchUrl,
-    label: 'LIST',
+    userData: { label: 'LIST' },
 });
 
 const crawler = new CheerioCrawler({
@@ -24,24 +24,60 @@ const crawler = new CheerioCrawler({
     useSessionPool: true,
     persistCookiesPerSession: true,
 
-    async requestHandler({ $, request, body }) {
+    async requestHandler({ $, request }) {
 
-        if (request.label === 'LIST') {
+        const label = request.userData.label;
 
-            console.log("=== RAW HTML LENGTH ===");
-            console.log(body.length);
+        // ======================
+        // LIST PAGE
+        // ======================
+        if (label === 'LIST') {
 
-            console.log("=== FIRST 1000 CHARS ===");
-            console.log(body.substring(0, 1000));
+            console.log('Processing search results page');
 
-            const allLinks = $('a');
-            console.log("Total <a> tags found:", allLinks.length);
+            const links = [];
 
-            allLinks.each((i, el) => {
+            $('a[href*="InmDetails.asp"]').each((_, el) => {
                 const href = $(el).attr('href');
+
                 if (href) {
-                    console.log("Link:", href);
+                    const fullUrl = `http://inmate-search.cobbsheriff.org/${href}`;
+                    links.push(fullUrl);
                 }
+            });
+
+            console.log(`Found ${links.length} booking links`);
+
+            for (const url of links) {
+                await requestQueue.addRequest({
+                    url,
+                    userData: { label: 'DETAIL' },
+                });
+            }
+        }
+
+        // ======================
+        // DETAIL PAGE
+        // ======================
+        if (label === 'DETAIL') {
+
+            console.log('Processing booking detail page:', request.url);
+
+            const name = $('td:contains("Name")').next().text().trim();
+            const dob = $('td:contains("DOB")').next().text().trim();
+            const raceSex = $('td:contains("Race/Sex")').next().text().trim();
+            const location = $('td:contains("Location")').next().text().trim();
+            const soid = $('td:contains("SOID")').next().text().trim();
+            const days = $('td:contains("Days in Custody")').next().text().trim();
+
+            await Actor.pushData({
+                name,
+                dob,
+                raceSex,
+                location,
+                soid,
+                daysInCustody: days,
+                detailUrl: request.url,
             });
         }
     },
