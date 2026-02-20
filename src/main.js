@@ -21,82 +21,20 @@ const crawler = new PlaywrightCrawler({
         await page.goto(searchUrl, { waitUntil: 'domcontentloaded' });
         await page.waitForSelector('table');
 
-        const inmates = await page.$$eval('table tr', rows =>
-            rows.slice(1).map(row => {
-                const cells = Array.from(row.querySelectorAll('td'));
+        console.log('Search page loaded');
 
-                const button = row.querySelector('input[type="button"]');
-                let bookingUrl = '';
-
-                if (button && button.getAttribute('onclick')) {
-                    const match = button.getAttribute('onclick')
-                        .match(/InmDetails\.asp[^']+/);
-                    if (match) {
-                        bookingUrl = match[0];
-                    }
-                }
-
-                return {
-                    name: cells[1]?.innerText.trim(),
-                    dob: cells[2]?.innerText.trim(),
-                    race: cells[3]?.innerText.trim(),
-                    sex: cells[4]?.innerText.trim(),
-                    location: cells[5]?.innerText.trim(),
-                    soid: cells[6]?.innerText.trim(),
-                    daysInCustody: cells[7]?.innerText.trim(),
-                    bookingUrl,
-                };
-            })
+        // DEBUG: extract raw HTML of each result row
+        const rows = await page.$$eval('table tr', trs =>
+            trs.slice(1).map(tr => ({
+                rawHtml: tr.innerHTML
+            }))
         );
 
-        console.log('Found inmates:', inmates.length);
+        console.log('Rows found:', rows.length);
 
-        for (const inmate of inmates) {
+        console.log('RAW ROW HTML BELOW:');
+        console.log(JSON.stringify(rows, null, 2));
 
-            if (!inmate.bookingUrl) continue;
-
-            const fullDetailUrl =
-                `http://inmate-search.cobbsheriff.org/${inmate.bookingUrl}`;
-
-            console.log('Opening detail page:', fullDetailUrl);
-
-            await page.goto(fullDetailUrl, { waitUntil: 'domcontentloaded' });
-            await page.waitForSelector('table');
-
-            const detailData = await page.evaluate(() => {
-
-                const getValue = (label) => {
-                    const cells = Array.from(document.querySelectorAll('td'));
-                    const match = cells.find(td =>
-                        td.innerText.trim().toLowerCase() === label.toLowerCase()
-                    );
-                    return match ? match.nextElementSibling?.innerText.trim() : '';
-                };
-
-                return {
-                    agencyId: getValue('Agency ID'),
-                    arrestDateTime: getValue('Arrest Date/Time'),
-                    bookingStarted: getValue('Booking Started'),
-                    bookingComplete: getValue('Booking Complete'),
-                    height: getValue('Height'),
-                    weight: getValue('Weight'),
-                    hair: getValue('Hair'),
-                    eyes: getValue('Eyes'),
-                    address: getValue('Address'),
-                    city: getValue('City'),
-                    state: getValue('State'),
-                    zip: getValue('Zip'),
-                    placeOfBirth: getValue('Place of Birth'),
-                    visibleScars: getValue('Visible Scars and Marks'),
-                };
-            });
-
-            await Actor.pushData({
-                ...inmate,
-                ...detailData,
-                detailUrl: fullDetailUrl,
-            });
-        }
     },
 });
 
