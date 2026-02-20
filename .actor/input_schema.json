@@ -1,0 +1,30 @@
+{
+    "title": "Cobb Inmate Scraper Input",
+    "type": "object",
+    "schemaVersion": 1,
+    "properties": {
+        "searchName": {
+            "title": "Search Name",
+            "type": "string",
+            "description": "Format: Last name space first name. Example: Smith John",
+            "editor": "textfield"
+        },
+        "searchType": {
+            "title": "Search Type",
+            "type": "string",
+            "editor": "select",
+            "enum": ["inCustody", "inquiry"],
+            "enumTitles": ["In Custody (faster)", "Inquiry (all records, slower)"],
+            "default": "inCustody"
+        },
+        "maxResults": {
+            "title": "Max Results",
+            "type": "integer",
+            "editor": "number",
+            "default": 10,
+            "minimum": 1,
+            "maximum": 100
+        }
+    },
+    "required": ["searchName"]
+}
