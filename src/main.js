@@ -20,57 +20,38 @@ const crawler = new PlaywrightCrawler({
         console.log('Opening search page');
 
         await page.goto(searchUrl, { waitUntil: 'domcontentloaded' });
+        await page.waitForSelector('table');
 
-        // WAIT FOR RESULTS TABLE
-        await page.waitForSelector('table', { timeout: 15000 });
-
-        console.log('Search page loaded');
-
-        // Debug: print page content length
-        const html = await page.content();
-        console.log('HTML length:', html.length);
-
-        const bookingLinks = await page.$$eval('a', links =>
-            links
-                .map(a => a.getAttribute('href'))
-                .filter(href => href && href.includes('InmDetails.asp'))
+        // Extract rows from results table
+        const rows = await page.$$eval('table tr', trs =>
+            trs.slice(1).map(tr => {
+                const cells = Array.from(tr.querySelectorAll('td'));
+                return cells.map(td => td.innerText.trim());
+            })
         );
 
-        console.log(`Found ${bookingLinks.length} booking links`);
+        console.log('Rows found:', rows.length);
 
-        for (const href of bookingLinks) {
+        for (const row of rows) {
 
-            const fullUrl = `http://inmate-search.cobbsheriff.org/${href}`;
-
-            console.log('Opening detail page:', fullUrl);
-
-            await page.goto(fullUrl, { waitUntil: 'domcontentloaded' });
-
-            await page.waitForSelector('table', { timeout: 10000 });
-
-            const data = await page.evaluate(() => {
-
-                const getValue = (label) => {
-                    const cells = Array.from(document.querySelectorAll('td'));
-                    const match = cells.find(td =>
-                        td.innerText.trim().toLowerCase() === label.toLowerCase()
-                    );
-                    return match ? match.nextElementSibling?.innerText.trim() : '';
-                };
-
-                return {
-                    name: getValue('Name'),
-                    dob: getValue('DOB'),
-                    raceSex: getValue('Race/Sex'),
-                    location: getValue('Location'),
-                    soid: getValue('SOID'),
-                    daysInCustody: getValue('Days in Custody'),
-                };
-            });
+            // Based on your screenshot structure:
+            // [Image, Name, DOB, Race, Sex, Location, SOID, Days, ...]
+            const name = row[1];
+            const dob = row[2];
+            const race = row[3];
+            const sex = row[4];
+            const location = row[5];
+            const soid = row[6];
+            const days = row[7];
 
             await Actor.pushData({
-                ...data,
-                detailUrl: fullUrl,
+                name,
+                dob,
+                race,
+                sex,
+                location,
+                soid,
+                daysInCustody: days,
             });
         }
     },
