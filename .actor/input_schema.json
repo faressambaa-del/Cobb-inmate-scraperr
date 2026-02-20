@@ -6,12 +6,13 @@
         "searchName": {
             "title": "Search Name",
             "type": "string",
-            "description": "Format: Last name space first name. Example: Smith John",
+            "description": "Inmate name to search. Format: Last name space first name. Example: Smith John",
             "editor": "textfield"
         },
         "searchType": {
             "title": "Search Type",
             "type": "string",
+            "description": "Choose In Custody for a faster search of current inmates, or Inquiry to search all records which is slower.",
             "editor": "select",
             "enum": ["inCustody", "inquiry"],
             "enumTitles": ["In Custody (faster)", "Inquiry (all records, slower)"],
@@ -20,6 +21,7 @@
         "maxResults": {
             "title": "Max Results",
             "type": "integer",
+            "description": "Maximum number of inmate records to scrape.",
             "editor": "number",
             "default": 10,
             "minimum": 1,
