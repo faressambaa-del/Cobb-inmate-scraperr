@@ -1,5 +1,5 @@
 import { Actor } from 'apify';
-import { CheerioCrawler } from 'crawlee';
+import { CheerioCrawler, RequestQueue } from 'crawlee';
 
 await Actor.init();
 
@@ -8,50 +8,104 @@ const input = await Actor.getInput();
 const {
     searchName = 'john',
     searchType = 'In Custody',
-    maxResults = 10,
 } = input || {};
-
-console.log(`Searching for: ${searchName}`);
 
 const searchUrl = `http://inmate-search.cobbsheriff.org/inquiry.asp?soid=&inmate_name=${encodeURIComponent(searchName)}&serial=&qry=${encodeURIComponent(searchType)}`;
 
-const results = [];
+const requestQueue = await RequestQueue.open();
 
-const crawler = new CheerioCrawler({
-    async requestHandler({ $, request }) {
-        console.log(`Processing ${request.url}`);
-
-        const tables = $('table');
-        console.log(`Tables found: ${tables.length}`);
-
-        tables.each((i, table) => {
-            const rows = $(table).find('tr');
-
-            if (rows.length > 1) {
-                rows.slice(1).each((_, row) => {
-                    const cells = $(row).find('td');
-
-                    if (cells.length >= 4) {
-                        const record = {
-                            name: $(cells[1]).text().trim(),
-                            dob: $(cells[2]).text().trim(),
-                            race: $(cells[3]).text().trim(),
-                        };
-
-                        if (record.name && record.name !== 'Name') {
-                            results.push(record);
-                        }
-                    }
-                });
-            }
-        });
-
-        console.log(`Extracted records: ${results.length}`);
-    }
+await requestQueue.addRequest({
+    url: searchUrl,
+    label: 'LIST',
 });
 
-await crawler.run([searchUrl]);
+const crawler = new CheerioCrawler({
+    requestQueue,
 
-await Actor.pushData(results.slice(0, maxResults));
+    async requestHandler({ $, request, enqueueLinks }) {
+
+        // =========================
+        // LIST PAGE (search results)
+        // =========================
+        if (request.label === 'LIST') {
+
+            console.log('Processing search results page');
+
+            $('table tr').each((_, row) => {
+                const cells = $(row).find('td');
+
+                if (cells.length > 5) {
+
+                    const name = $(cells[1]).text().trim();
+                    const soid = $(cells[6]).text().trim();
+
+                    const bookingLink = $(cells[8]).find('a').attr('href');
+
+                    if (bookingLink) {
+                        const fullUrl = `http://inmate-search.cobbsheriff.org/${bookingLink}`;
+
+                        console.log('Queueing booking page:', fullUrl);
+
+                        requestQueue.addRequest({
+                            url: fullUrl,
+                            label: 'DETAIL',
+                            userData: { name },
+                        });
+                    }
+                }
+            });
+        }
+
+        // =========================
+        // DETAIL PAGE (booking info)
+        // =========================
+        if (request.label === 'DETAIL') {
+
+            console.log('Processing booking detail page');
+
+            const name = $('td:contains("Name")')
+                .next()
+                .text()
+                .trim();
+
+            const dob = $('td:contains("DOB")')
+                .next()
+                .text()
+                .trim();
+
+            const raceSex = $('td:contains("Race/Sex")')
+                .next()
+                .text()
+                .trim();
+
+            const location = $('td:contains("Location")')
+                .next()
+                .text()
+                .trim();
+
+            const soid = $('td:contains("SOID")')
+                .next()
+                .text()
+                .trim();
+
+            const days = $('td:contains("Days in Custody")')
+                .next()
+                .text()
+                .trim();
+
+            await Actor.pushData({
+                name,
+                dob,
+                raceSex,
+                location,
+                soid,
+                daysInCustody: days,
+                detailUrl: request.url,
+            });
+        }
+    },
+});
+
+await crawler.run();
 
 await Actor.exit();
