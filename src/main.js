@@ -21,77 +21,52 @@ await requestQueue.addRequest({
 
 const crawler = new CheerioCrawler({
     requestQueue,
+    useSessionPool: true,
+    persistCookiesPerSession: true,
 
-    async requestHandler({ $, request, enqueueLinks }) {
+    async requestHandler({ $, request }) {
 
         // =========================
-        // LIST PAGE (search results)
+        // LIST PAGE
         // =========================
         if (request.label === 'LIST') {
 
             console.log('Processing search results page');
 
-            $('table tr').each((_, row) => {
-                const cells = $(row).find('td');
+            const links = [];
 
-                if (cells.length > 5) {
+            $('a[href*="InmDetails.asp"]').each((_, el) => {
+                const href = $(el).attr('href');
 
-                    const name = $(cells[1]).text().trim();
-                    const soid = $(cells[6]).text().trim();
-
-                    const bookingLink = $(cells[8]).find('a').attr('href');
-
-                    if (bookingLink) {
-                        const fullUrl = `http://inmate-search.cobbsheriff.org/${bookingLink}`;
-
-                        console.log('Queueing booking page:', fullUrl);
-
-                        requestQueue.addRequest({
-                            url: fullUrl,
-                            label: 'DETAIL',
-                            userData: { name },
-                        });
-                    }
+                if (href) {
+                    const fullUrl = `http://inmate-search.cobbsheriff.org/${href}`;
+                    links.push(fullUrl);
                 }
             });
+
+            console.log(`Found ${links.length} booking links`);
+
+            for (const url of links) {
+                await requestQueue.addRequest({
+                    url,
+                    label: 'DETAIL',
+                });
+            }
         }
 
         // =========================
-        // DETAIL PAGE (booking info)
+        // DETAIL PAGE
         // =========================
         if (request.label === 'DETAIL') {
 
-            console.log('Processing booking detail page');
+            console.log('Processing booking detail page:', request.url);
 
-            const name = $('td:contains("Name")')
-                .next()
-                .text()
-                .trim();
-
-            const dob = $('td:contains("DOB")')
-                .next()
-                .text()
-                .trim();
-
-            const raceSex = $('td:contains("Race/Sex")')
-                .next()
-                .text()
-                .trim();
-
-            const location = $('td:contains("Location")')
-                .next()
-                .text()
-                .trim();
-
-            const soid = $('td:contains("SOID")')
-                .next()
-                .text()
-                .trim();
-
-            const days = $('td:contains("Days in Custody")')
-                .next()
-                .text()
-                .trim();
+            const name = $('td:contains("Name")').next().text().trim();
+            const dob = $('td:contains("DOB")').next().text().trim();
+            const raceSex = $('td:contains("Race/Sex")').next().text().trim();
+            const location = $('td:contains("Location")').next().text().trim();
+            const soid = $('td:contains("SOID")').next().text().trim();
+            const days = $('td:contains("Days in Custody")').next().text().trim();
 
             await Actor.pushData({
                 name,
