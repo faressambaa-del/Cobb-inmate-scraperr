@@ -24,23 +24,34 @@ const crawler = new CheerioCrawler({
     useSessionPool: true,
     persistCookiesPerSession: true,
 
+    requestHandlerTimeoutSecs: 60,
+
+    preNavigationHooks: [
+        async ({ request }) => {
+            request.headers = {
+                ...request.headers,
+                'User-Agent':
+                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                Referer:
+                    'http://inmate-search.cobbsheriff.org/enter_name.htm',
+            };
+        },
+    ],
+
     async requestHandler({ $, request }) {
 
         const label = request.userData.label;
 
-        // ======================
-        // LIST PAGE
-        // ======================
         if (label === 'LIST') {
 
             console.log('Processing search results page');
 
             const links = [];
 
-            $('a[href*="InmDetails.asp"]').each((_, el) => {
+            $('a').each((_, el) => {
                 const href = $(el).attr('href');
 
-                if (href) {
+                if (href && href.includes('InmDetails.asp')) {
                     const fullUrl = `http://inmate-search.cobbsheriff.org/${href}`;
                     links.push(fullUrl);
                 }
@@ -56,9 +67,6 @@ const crawler = new CheerioCrawler({
             }
         }
 
-        // ======================
-        // DETAIL PAGE
-        // ======================
         if (label === 'DETAIL') {
 
             console.log('Processing booking detail page:', request.url);
