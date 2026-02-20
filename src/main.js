@@ -1,41 +1,57 @@
-async requestHandler({ $, request }) {
-    console.log(`Processing ${request.url}`);
+import { Actor } from 'apify';
+import { CheerioCrawler } from 'crawlee';
 
-    const tables = $('table');
-    console.log(`Total tables found: ${tables.length}`);
+await Actor.init();
 
-    let dataFound = false;
+const input = await Actor.getInput();
 
-    tables.each((i, table) => {
-        const rows = $(table).find('tr');
+const {
+    searchName = 'john',
+    searchType = 'In Custody',
+    maxResults = 10,
+} = input || {};
 
-        // We want tables that have actual data rows
-        if (rows.length > 1) {
-            console.log(`Checking table ${i} with ${rows.length} rows`);
+console.log(`Searching for: ${searchName}`);
 
-            rows.slice(1).each((_, row) => {
-                const cells = $(row).find('td');
+const searchUrl = `http://inmate-search.cobbsheriff.org/inquiry.asp?soid=&inmate_name=${encodeURIComponent(searchName)}&serial=&qry=${encodeURIComponent(searchType)}`;
 
-                if (cells.length >= 4) {
-                    const record = {
-                        name: $(cells[1]).text().trim(),
-                        dob: $(cells[2]).text().trim(),
-                        race: $(cells[3]).text().trim(),
-                    };
+const results = [];
 
-                    // Only push real inmate rows
-                    if (record.name && record.name !== 'Name') {
-                        dataFound = true;
-                        results.push(record);
+const crawler = new CheerioCrawler({
+    async requestHandler({ $, request }) {
+        console.log(`Processing ${request.url}`);
+
+        const tables = $('table');
+        console.log(`Tables found: ${tables.length}`);
+
+        tables.each((i, table) => {
+            const rows = $(table).find('tr');
+
+            if (rows.length > 1) {
+                rows.slice(1).each((_, row) => {
+                    const cells = $(row).find('td');
+
+                    if (cells.length >= 4) {
+                        const record = {
+                            name: $(cells[1]).text().trim(),
+                            dob: $(cells[2]).text().trim(),
+                            race: $(cells[3]).text().trim(),
+                        };
+
+                        if (record.name && record.name !== 'Name') {
+                            results.push(record);
+                        }
                     }
-                }
-            });
-        }
-    });
+                });
+            }
+        });
 
-    if (!dataFound) {
-        console.log("⚠️ No inmate records found on this page.");
-    } else {
-        console.log(`✅ Extracted ${results.length} inmate records.`);
+        console.log(`Extracted records: ${results.length}`);
     }
-}
+});
+
+await crawler.run([searchUrl]);
+
+await Actor.pushData(results.slice(0, maxResults));
+
+await Actor.exit();
